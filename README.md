@@ -5,32 +5,70 @@ Premises
 gcloud components update
 ```
 
-1. Listing containers
+1. Create Kubernetes map - Discovering :
+- clusters
+- namespaces
+- workloads
+- service accounts
+- ingressos
+- pipelines
+- ferramentas instaladas
 
+`Listing containters`
 ```
-gcloud container clusters list
+gcloud container clusters list > 1.1-all_containers.txt
 ```
 
-2. Getting credentials
-
+`Getting credentials`
 ```
 gcloud container clusters get-credentials CLUSTER_NAME --region REGION
 ```
 
-3. Getting namespaces and workloads
+2. Discovering namespaces and workloads
 
+`Getting namespaces and workloads`
 ```
-kubectl get ns
-```
-
-4. Getting workloads
-
-```
-kubectl get deploy,statefulset,daemonset -A
+kubectl get ns  > 2.1-all_namespaces.txt
 ```
 
-5. Getting all Service Accounts
+`Getting workloads`
+```
+kubectl get deploy,statefulset,daemonset -A  > 2.2-all_workloads.txt
+```
+
+`Getting all Service Accounts`
+```
+kubectl get sa -A > ServiceAccounts.txt  > 2.3-all_service_accounts.txt
+```
+
+`Getting all Pods`
+```
+kubectl get pods -A > Pods.txt  > 2.4-all_pods.txt
+```
+
+3. Kubernetes secrets discovering
+
+- are there Kubernetes Secrets?
+- only used Secret Manager?
+- is there a mix?
+- is there hardcoded secret?
 
 ```
-kubectl get sa -A > ServiceAccounts.txt
+kubectl get secrets -A > 3.1_all_secrets.txt
+```
+
+`Classifying as:`
+- opaque
+- docker-registry
+- tls
+- helm
+- service-account-token
+
+`Looking for workloads references`
+
+4. Discovering GCP Secret Manager usage
+
+`Getting all secrets`
+```
+gcloud secrets list > 4.1_secrets_list.txt
 ```
