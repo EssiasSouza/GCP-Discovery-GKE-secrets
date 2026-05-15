@@ -1,175 +1,336 @@
-Your bash logic is probably fine now.
+# 1. List existing Kubernetes namespaces
 
-This is still IAM permission propagation or policy mismatch.
-
-The key clue is:
-
-```text id="w7x3d1"
-because no identity-based policy allows the secretsmanager:GetSecretValue action
+```bash
+kubectl get ns
 ```
-
-AWS is explicitly saying:
-
-> "I evaluated the policies attached to this IAM user and did not find GetSecretValue allowed for this resource."
-
-So focus on IAM, not bash.
 
 ---
 
-Most likely causes now:
+# 2. Create the test namespace
 
-# 1. Policy not yet attached/applied
-
-AWS IAM changes can take some seconds/minutes to propagate.
-
-Test:
-
-```bash id="x2m8f9"
-aws sts get-caller-identity
+```bash
+kubectl create namespace ns-test-secret
 ```
 
-to confirm the user.
+Validate:
 
-Then wait 1–2 minutes and retry.
+```bash
+kubectl get ns
+```
 
 ---
 
-# 2. Wrong resource ARN pattern
+# 3. Create the 3 secrets inside the namespace
 
-Your secret resource is:
+## Secret 1
 
-```text id="p4k1z7"
-gke-gringo-staging/default/teste-essias
+```bash
+kubectl create secret generic secret-test-1 \
+  -n ns-test-secret \
+  --from-literal=key1=value1 \
+  --from-literal=key2=value2 \
+  --from-literal=key3=value3
 ```
-
-But Secrets Manager internally stores ARNs like:
-
-```text id="n8v2q5"
-arn:aws:secretsmanager:sa-east-1:498638359097:secret:gke-gringo-staging/default/teste-essias-ABC123
-```
-
-So your policy should be:
-
-```json id="t7c9r4"
-"Resource": [
-  "arn:aws:secretsmanager:sa-east-1:498638359097:secret:gke-gringo-staging/*"
-]
-```
-
-OR even temporarily:
-
-```json id="h5s1x8"
-"Resource": "*"
-```
-
-to validate the issue.
 
 ---
 
-# 3. Easiest debug approach
+## Secret 2
 
-Temporarily use this policy:
+```bash
+kubectl create secret generic secret-test-2 \
+  -n ns-test-secret \
+  --from-literal=key1=value1 \
+  --from-literal=key2=value2 \
+  --from-literal=key3=value3
+```
 
-```json id="j3w6n2"
+---
+
+## Secret 3
+
+```bash
+kubectl create secret generic secret-test-3 \
+  -n ns-test-secret \
+  --from-literal=key1=value1 \
+  --from-literal=key2=value2 \
+  --from-literal=key3=value3
+```
+
+---
+
+# 4. List the created secrets
+
+```bash
+kubectl get secrets -n ns-test-secret
+```
+
+You should see:
+
+* secret-test-1
+* secret-test-2
+* secret-test-3
+
+---
+
+# 5. Validate the secret values
+
+## Secret 1
+
+```bash
+kubectl get secret secret-test-1 \
+  -n ns-test-secret \
+  -o json
+```
+
+---
+
+## View decoded values
+
+### key1
+
+```bash
+kubectl get secret secret-test-1 \
+  -n ns-test-secret \
+  -o jsonpath='{.data.key1}' | base64 -d
+echo
+```
+
+### key2
+
+```bash
+kubectl get secret secret-test-1 \
+  -n ns-test-secret \
+  -o jsonpath='{.data.key2}' | base64 -d
+echo
+```
+
+### key3
+
+```bash
+kubectl get secret secret-test-1 \
+  -n ns-test-secret \
+  -o jsonpath='{.data.key3}' | base64 -d
+echo
+```
+
+---
+
+# 6. List only the secret names
+
+This will probably be used in your script:
+
+```bash
+kubectl get secrets \
+  -n ns-test-secret \
+  --no-headers \
+  -o custom-columns=":metadata.name"
+```
+
+Or:
+
+```bash
+kubectl get secrets \
+  -n ns-test-secret \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
+```
+
+---
+
+# 7. Run your script
+
+Example:
+
+```bash
+./main.sh
+```
+
+or
+
+```bash
+bash main.sh
+```
+
+---
+
+# 8. Expected script behavior
+
+The expected workflow is:
+
+## For each Kubernetes secret:
+
+Example:
+
+* secret-test-1
+* secret-test-2
+* secret-test-3
+
+The script should:
+
+### STEP A — Read values from the Kubernetes secret
+
+Example:
+
+```json
 {
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": "secretsmanager:*",
-      "Resource": "*"
-    }
-  ]
+  "key1": "value1",
+  "key2": "value2",
+  "key3": "value3"
 }
 ```
 
-If everything suddenly works:
-
-* your script is fine
-* your AWS CLI is fine
-* your resource ARN restriction is wrong
-
-Then you can tighten permissions afterward.
-
-This is the fastest way to isolate the problem.
-
 ---
 
-# 4. Another important thing
+### STEP B — Check if the secret already exists in AWS Secrets Manager
 
-Your command should be quoted:
+Example:
 
-Current:
-
-```bash id="k1y4v6"
---secret-id $SECRET
-```
-
-Better:
-
-```bash id="u9r7m3"
---secret-id "$SECRET"
-```
-
-and:
-
-```bash id="f6n2p8"
-echo "$json"
-echo "$existing_values"
+```bash
+aws secretsmanager describe-secret \
+  --secret-id secret-test-1
 ```
 
 ---
 
-# 5. Your loop is still dangerous
+## Scenario 1 — Secret EXISTS
 
-This is still problematic:
+The script should:
 
-```bash id="r2q5w1"
-for i in $new_values; do
+1. Read the current content:
+
+```bash
+aws secretsmanager get-secret-value \
+  --secret-id secret-test-1
 ```
 
-because secrets containing spaces/newlines will break.
+2. Iterate through the keys
+3. Update/add the values
+4. Execute:
 
-Better:
-
-```bash id="m8c4t7"
-while IFS= read -r i; do
-```
-
----
-
-# 6. Major bug: invalid JSON handling
-
-This line:
-
-```bash id="d4v9s2"
-json=$(echo $json | jq ...)
-```
-
-will corrupt JSON if it contains spaces/newlines.
-
-Use:
-
-```bash id="y7k3n6"
-json=$(echo "$json" | jq ...)
+```bash
+aws secretsmanager update-secret \
+  --secret-id secret-test-1 \
+  --secret-string '<json>'
 ```
 
 ---
 
-So right now:
+## Scenario 2 — Secret DOES NOT EXIST
 
-* your bash code has some improvements needed
-* but the CURRENT error is still IAM policy related, not shell related
+The script should:
 
-The fastest way forward is:
+1. Create the secret:
 
-1. temporarily allow:
+```bash
+aws secretsmanager create-secret \
+  --name secret-test-1 \
+  --secret-string '{}'
+```
 
-   ```json
-   "Action": "secretsmanager:*",
-   "Resource": "*"
-   ```
+2. Iterate through the Kubernetes values
+3. Update the JSON
+4. Execute:
 
-2. confirm script works
+```bash
+aws secretsmanager update-secret \
+  --secret-id secret-test-1 \
+  --secret-string '<final_json>'
+```
 
-3. then reduce permissions carefully until least privilege is achieved.
+---
+
+# 9. Validate secrets in AWS Secrets Manager
+
+List all secrets:
+
+```bash
+aws secretsmanager list-secrets
+```
+
+---
+
+## View one secret content
+
+```bash
+aws secretsmanager get-secret-value \
+  --secret-id secret-test-1
+```
+
+---
+
+# 10. Remove Kubernetes secrets
+
+## Secret 1
+
+```bash
+kubectl delete secret secret-test-1 -n ns-test-secret
+```
+
+## Secret 2
+
+```bash
+kubectl delete secret secret-test-2 -n ns-test-secret
+```
+
+## Secret 3
+
+```bash
+kubectl delete secret secret-test-3 -n ns-test-secret
+```
+
+Or delete all at once:
+
+```bash
+kubectl delete secrets --all -n ns-test-secret
+```
+
+---
+
+# 11. Validate removal
+
+```bash
+kubectl get secrets -n ns-test-secret
+```
+
+---
+
+# 12. Remove the namespace
+
+```bash
+kubectl delete namespace ns-test-secret
+```
+
+---
+
+# 13. Final validation
+
+```bash
+kubectl get ns
+```
+
+The namespace `ns-test-secret` should no longer exist.
+
+---
+
+# Important tip for your script
+
+You will probably want to ignore Kubernetes default secrets such as:
+
+```text
+default-token-xxxxx
+```
+
+or
+
+```text
+builder-token-xxxxx
+```
+
+So filter only:
+
+```bash
+kubectl get secrets \
+  -n ns-test-secret \
+  --field-selector type=Opaque
+```
+
+This way you only retrieve manually created secrets.
